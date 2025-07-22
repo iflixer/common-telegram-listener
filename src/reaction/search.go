@@ -61,6 +61,6 @@ func (s *Service) searchPosts(apiURL, appURL, query string) (inlineMenu string, 
 		}
 		inlineMenu = string(inlineMenuBytes)
 	}
-	log.Println("searchPosts:", apiURL, "query:", query, "found:", len(posts), "inlineMenu:", inlineMenu)
+	//log.Println("searchPosts:", apiURL, "query:", query, "found:", len(posts), "inlineMenu:", inlineMenu)
 	return
 }

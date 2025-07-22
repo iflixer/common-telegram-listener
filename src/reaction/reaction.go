@@ -78,65 +78,69 @@ func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot)
 					}
 					return nil
 				})
-			} else { // text
-				tbot.Handle(telebot.OnText, func(c telebot.Context) error {
-					msg := c.Text() // Получаем текст сообщения
-					database.UpsertUser(s.dbService, botID, c.Sender().ID, msg)
-					log.Printf("bot:%d received message from %d (%s): %s", botID, c.Sender().ID, c.Sender().Username, msg)
-					//log.Printf("Searching for reaction: %+v", reaction)
-
-					// может это команда без слеша?
-					if strings.HasPrefix(msg, reaction.Handle) {
-						log.Printf("Found reaction for message: %s", msg)
-						err := s.senderService.SendText(tbot, c.Sender().ID, reaction.Answer, reaction.InlineMenu, reaction.ReplyMenu)
-						if err != nil {
-							log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
-						}
-						return err
-					}
-
-					inlineMenu, err := s.searchPosts(reaction.Handle, appURL, msg)
-					if err != nil {
-						log.Printf("❌ Failed to search posts for reaction ID %d: %v", reaction.ID, err)
-						answer := "Search error. Try later"
-						settingNotFound, err := s.settingsService.GetOne(botID, "search", "not_found")
-						if err == nil && settingNotFound != nil {
-							answer = settingNotFound.Content
-						}
-						err = s.senderService.SendText(tbot, c.Sender().ID, answer, inlineMenu, "")
-						if err != nil {
-							log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
-						}
-						return err
-					}
-
-					if inlineMenu != "" {
-						answer := strings.ReplaceAll(reaction.Answer, "[orig-message]", msg)
-						answer = strings.ReplaceAll(answer, "[user-username]", c.Sender().Username)
-						err = s.senderService.SendText(tbot, c.Sender().ID, answer, inlineMenu, reaction.ReplyMenu)
-						if err != nil {
-							log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
-						}
-						return err
-					}
-
-					if reaction.AdditionalMessageID > 0 {
-						log.Printf("No posts found for reaction ID %d with handle %s", reaction.ID, reaction.Handle)
-						reaction2 := s.getOne(reaction.AdditionalMessageID)
-						answer := strings.ReplaceAll(reaction2.Answer, "[orig-message]", msg)
-						answer = strings.ReplaceAll(answer, "[user-username]", c.Sender().Username)
-						err = s.senderService.SendText(tbot, c.Sender().ID, answer, reaction2.InlineMenu, reaction2.ReplyMenu)
-						if err != nil {
-							log.Printf("❌ Failed to send message ID %d: %v", reaction2.ID, err)
-						}
-						return err
-					}
-
-					return nil
-				})
 			}
 		}
 	}
+
+	tbot.Handle(telebot.OnText, func(c telebot.Context) error {
+		msg := c.Text() // Получаем текст сообщения
+		database.UpsertUser(s.dbService, botID, c.Sender().ID, msg)
+		log.Printf("bot:%d received message from %d (%s): %s", botID, c.Sender().ID, c.Sender().Username, msg)
+
+		reaction := s.getOneByHandle(botID, msg)
+
+		// может это команда без слеша?
+		if reaction != nil {
+			log.Printf("Non-slash command: %+v", reaction)
+			log.Printf("Found reaction for message: %s", msg)
+			err := s.senderService.SendText(tbot, c.Sender().ID, reaction.Answer, reaction.InlineMenu, reaction.ReplyMenu)
+			if err != nil {
+				log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
+			}
+			return err
+		}
+
+		reaction = s.getOneByHandle(botID, "https://")
+
+		inlineMenu, err := s.searchPosts(reaction.Handle, appURL, msg)
+		if err != nil {
+			log.Printf("❌ Failed to search posts for reaction ID %d: %v", reaction.ID, err)
+			answer := "Search error. Try later"
+			settingNotFound, err := s.settingsService.GetOne(botID, "search", "not_found")
+			if err == nil && settingNotFound != nil {
+				answer = settingNotFound.Content
+			}
+			err = s.senderService.SendText(tbot, c.Sender().ID, answer, inlineMenu, "")
+			if err != nil {
+				log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
+			}
+			return err
+		}
+
+		if inlineMenu != "" {
+			answer := strings.ReplaceAll(reaction.Answer, "[orig-message]", msg)
+			answer = strings.ReplaceAll(answer, "[user-username]", c.Sender().Username)
+			err = s.senderService.SendText(tbot, c.Sender().ID, answer, inlineMenu, reaction.ReplyMenu)
+			if err != nil {
+				log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
+			}
+			return err
+		}
+
+		if reaction.AdditionalMessageID > 0 {
+			log.Printf("No posts found for reaction ID %d with handle %s", reaction.ID, reaction.Handle)
+			reaction2 := s.getOne(reaction.AdditionalMessageID)
+			answer := strings.ReplaceAll(reaction2.Answer, "[orig-message]", msg)
+			answer = strings.ReplaceAll(answer, "[user-username]", c.Sender().Username)
+			err = s.senderService.SendText(tbot, c.Sender().ID, answer, reaction2.InlineMenu, reaction2.ReplyMenu)
+			if err != nil {
+				log.Printf("❌ Failed to send message ID %d: %v", reaction2.ID, err)
+			}
+			return err
+		}
+
+		return nil
+	})
 }
 
 func (s *Service) loadWorker() {
@@ -160,4 +164,15 @@ func (s *Service) loadData() (err error) {
 	s.reactions = reactions
 
 	return
+}
+
+func (s *Service) getOneByHandle(botID int, handle string) *database.TelegramBotReaction {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, reaction := range s.reactions {
+		if reaction.BotID == botID && strings.HasPrefix(reaction.Handle, handle) {
+			return reaction
+		}
+	}
+	return nil
 }
