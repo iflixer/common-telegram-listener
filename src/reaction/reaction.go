@@ -83,7 +83,18 @@ func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot)
 					msg := c.Text() // Получаем текст сообщения
 					database.UpsertUser(s.dbService, botID, c.Sender().ID, msg)
 					log.Printf("bot:%d received message from %d (%s): %s", botID, c.Sender().ID, c.Sender().Username, msg)
-					log.Printf("Searching for reaction: %+v", reaction)
+					//log.Printf("Searching for reaction: %+v", reaction)
+
+					// может это команда без слеша?
+					if strings.HasPrefix(msg, reaction.Handle) {
+						log.Printf("Found reaction for message: %s", msg)
+						err := s.senderService.SendText(tbot, c.Sender().ID, reaction.Answer, reaction.InlineMenu, reaction.ReplyMenu)
+						if err != nil {
+							log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
+						}
+						return err
+					}
+
 					inlineMenu, err := s.searchPosts(reaction.Handle, appURL, msg)
 					if err != nil {
 						log.Printf("❌ Failed to search posts for reaction ID %d: %v", reaction.ID, err)
