@@ -62,8 +62,12 @@ func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot)
 			// add or update user
 			if strings.HasPrefix(reaction.Handle, "/") { // command
 				tbot.Handle(reaction.Handle, func(c telebot.Context) error {
-					database.UpsertUser(s.dbService, botID, c.Sender().ID, reaction.Handle)
-					log.Printf("bot:%d received command from %d (%s): %s", botID, c.Sender().ID, c.Sender().Username, reaction.Handle)
+					msg := c.Text() // Получаем текст сообщения
+					if len(msg) > 200 {
+						msg = msg[:200] // Ограничиваем длину сообщения до 200 символов
+					}
+					database.UpsertUser(s.dbService, botID, c.Sender().ID, msg)
+					log.Printf("bot:%d received command from %d (%s): %s", botID, c.Sender().ID, c.Sender().Username, msg)
 					for reaction != nil {
 						err := s.senderService.SendText(tbot, c.Sender().ID, reaction.Answer, reaction.InlineMenu, reaction.ReplyMenu)
 						if err != nil {
@@ -84,6 +88,10 @@ func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot)
 
 	tbot.Handle(telebot.OnText, func(c telebot.Context) error {
 		msg := c.Text() // Получаем текст сообщения
+		if len(msg) > 200 {
+			msg = msg[:200] // Ограничиваем длину сообщения до 200 символов
+		}
+
 		database.UpsertUser(s.dbService, botID, c.Sender().ID, msg)
 		log.Printf("bot:%d received message from %d (%s): %s", botID, c.Sender().ID, c.Sender().Username, msg)
 
