@@ -55,6 +55,14 @@ func (s *Service) getOne(id int) *database.TelegramBotReaction {
 }
 
 func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot) {
+
+	// tbot.Use(func(next telebot.HandlerFunc) telebot.HandlerFunc {
+	// 	return func(c telebot.Context) error {
+	// 		log.Printf("[DEBUG] ChatType: %s, Message from %s: %s", c.Chat().Type, c.Sender().Username, c.Text())
+	// 		return next(c)
+	// 	}
+	// })
+
 	reactions := s.getAllReactions()
 	for _, reaction := range reactions {
 		if reaction.BotID == botID && reaction.Handle != "" {
@@ -71,7 +79,7 @@ func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot)
 					for reaction != nil {
 						err := s.senderService.SendText(tbot, c.Sender().ID, reaction.Answer, reaction.InlineMenu, reaction.ReplyMenu)
 						if err != nil {
-							log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
+							log.Printf("❌ Failed to send message by bot %d to %d: %v", botID, c.Sender().ID, err)
 							return err
 						}
 						if reaction.AdditionalMessageID > 0 {
@@ -92,6 +100,22 @@ func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot)
 			msg = msg[:200] // Ограничиваем длину сообщения до 200 символов
 		}
 
+		chatType := c.Chat().Type
+		log.Println("Received message in chat type:", chatType, "from user:", c.Sender().ID, "with text:", msg)
+
+		msgPrefix := ""
+		switch chatType {
+		case telebot.ChatPrivate:
+			// Это личный чат (1:1 с пользователем)
+			log.Println("Личное сообщение от пользователя:", c.Sender().Username)
+		case telebot.ChatGroup, telebot.ChatSuperGroup:
+			// Это группа или супергруппа
+			log.Println("Сообщение в группе:", c.Chat().Title)
+			msgPrefix = c.Sender().Username + ": "
+		default:
+			log.Println("Другой тип чата:", chatType)
+		}
+
 		database.UpsertUser(s.dbService, botID, c.Sender().ID, msg)
 		log.Printf("bot:%d received message from %d (%s): %s", botID, c.Sender().ID, c.Sender().Username, msg)
 
@@ -101,15 +125,18 @@ func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot)
 		if reaction != nil {
 			log.Printf("Non-slash command: %+v", reaction)
 			log.Printf("Found reaction for message: %s", msg)
-			err := s.senderService.SendText(tbot, c.Sender().ID, reaction.Answer, reaction.InlineMenu, reaction.ReplyMenu)
+			err := s.senderService.SendText(tbot, c.Sender().ID, msgPrefix+reaction.Answer, reaction.InlineMenu, reaction.ReplyMenu)
 			if err != nil {
-				log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
+				log.Printf("❌ Failed to send message by bot %d to %d: %v", botID, c.Sender().ID, err)
 			}
 			return err
 		}
 
 		reaction = s.getOneByHandle(botID, "https://")
-
+		if reaction == nil {
+			log.Printf("❌ Failed to load search reaction for botID %d", botID)
+			return nil
+		}
 		inlineMenu, err := s.searchPosts(reaction.Handle, appURL, msg)
 		if err != nil {
 			log.Printf("❌ Failed to search posts for reaction ID %d: %v", reaction.ID, err)
@@ -118,9 +145,9 @@ func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot)
 			if err == nil && settingNotFound != nil {
 				answer = settingNotFound.Content
 			}
-			err = s.senderService.SendText(tbot, c.Sender().ID, answer, inlineMenu, "")
+			err = s.senderService.SendText(tbot, c.Sender().ID, msgPrefix+answer, inlineMenu, "")
 			if err != nil {
-				log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
+				log.Printf("❌ Failed to send message by bot %d to %d: %v", botID, c.Sender().ID, err)
 			}
 			return err
 		}
@@ -128,9 +155,9 @@ func (s *Service) RegisterReactions(botID int, appURL string, tbot *telebot.Bot)
 		if inlineMenu != "" {
 			answer := strings.ReplaceAll(reaction.Answer, "[orig-message]", msg)
 			answer = strings.ReplaceAll(answer, "[user-username]", c.Sender().Username)
-			err = s.senderService.SendText(tbot, c.Sender().ID, answer, inlineMenu, reaction.ReplyMenu)
+			err = s.senderService.SendText(tbot, c.Sender().ID, msgPrefix+answer, inlineMenu, reaction.ReplyMenu)
 			if err != nil {
-				log.Printf("❌ Failed to send message ID %d: %v", reaction.ID, err)
+				log.Printf("❌ Failed to send message by bot %d to %d: %v", botID, c.Sender().ID, err)
 			}
 			return err
 		}
